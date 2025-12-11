@@ -128,7 +128,7 @@ def handle_auth():
             if st.button("Log out"):
                 logout_customer()
                 st.success("You have been logged out.")
-                st.experimental_rerun()
+                st.rerun()
         else:
             st.info("Create an account or log in to manage your details and view your orders here.")
 
@@ -160,7 +160,7 @@ def handle_auth():
                                 }
                             )
                             st.success("Logged in successfully.")
-                            st.experimental_rerun()
+                            st.rerun()
                         else:
                             st.error("Incorrect password.")
 
@@ -204,7 +204,7 @@ def handle_auth():
                         }
                     )
                     st.success("Account created and logged in.")
-                    st.experimental_rerun()
+                    st.rerun()
 
     # Guest tab
     with tab_guest:
@@ -212,7 +212,7 @@ def handle_auth():
         if st.button("Continue as guest", key="guest_btn"):
             logout_customer()
             st.success("You are continuing as a guest.")
-            st.experimental_rerun()
+            st.rerun()
 
 st.title("Bakery – Order Online")
 st.caption("Place your order and choose a collection or delivery time.")
