@@ -46,6 +46,19 @@ def _generate_slots_for_date(date_obj, opening_hours, slot_rules):
         return []
     open_t = row["open_time"]
     close_t = row["close_time"]
+    # Supabase REST returns TIME columns as strings (e.g. "09:00:00"). Convert to datetime.time.
+    if isinstance(open_t, str):
+        s = open_t.strip()
+        try:
+            open_t = datetime.strptime(s, "%H:%M").time()
+        except ValueError:
+            open_t = datetime.strptime(s, "%H:%M:%S").time()
+    if isinstance(close_t, str):
+        s = close_t.strip()
+        try:
+            close_t = datetime.strptime(s, "%H:%M").time()
+        except ValueError:
+            close_t = datetime.strptime(s, "%H:%M:%S").time()
     slot_len = slot_rules["slot_length_minutes"]
 
     slots = []
