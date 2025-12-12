@@ -174,11 +174,11 @@ def render_my_orders(supabase, session):
         return
 
     for o in orders:
-        with st.container(border=True):
-            code = o.get("order_code","Order")
-            status = o.get("status","")
-            st.markdown(f"**{code}** — {status}  
-_{STATUS_HELP.get(status,'')}_")
+    with st.container(border=True):
+        code = o.get("order_code", "Order")
+        status = o.get("status", "")
+        st.markdown(f"**{code}** — {status}")
+        st.caption(STATUS_HELP.get(status, ""))
             st.caption(f"{o.get('order_type','')} • Total £{float(o.get('total_inc_vat') or 0):.2f}")
             cols = st.columns([1,1,2])
             with cols[0]:
