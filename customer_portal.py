@@ -1,6 +1,8 @@
 import streamlit as st
 from ui_text import TERMS_AND_CONDITIONS, STATUS_HELP
 
+VAT_DEFAULT = 20.0  # used only to compute ex-VAT unit prices for order_items rows
+
 def _cart():
     return st.session_state.setdefault("cart", {})  # {product_id: qty}
 
@@ -86,6 +88,9 @@ def render_cart_sidebar(supabase):
             clear_cart()
             st.rerun()
 
+def _compute_unit_ex_vat(unit_inc_vat: float, vat_percent: float) -> float:
+    return round(unit_inc_vat / (1.0 + (vat_percent / 100.0)), 2)
+
 def render_checkout(supabase, customer_row=None, session=None):
     st.subheader("Checkout")
 
@@ -116,21 +121,29 @@ def render_checkout(supabase, customer_row=None, session=None):
         p = prod_map.get(pid)
         if not p:
             continue
-        price = float(p.get("recommended_price_inc_vat") or 0)
-        line_total = round(price * int(qty), 2)
+        qty_i = int(qty)
+        unit_inc = float(p.get("recommended_price_inc_vat") or 0)
+        unit_ex = _compute_unit_ex_vat(unit_inc, VAT_DEFAULT)
+        line_total = round(unit_inc * qty_i, 2)
         total += line_total
 
+        # For normal DB insert (must include unit_price_ex_vat because it's NOT NULL in your schema)
         line_items_for_db.append({
             "product_id": int(p["id"]),
             "product_name_snapshot": p.get("name", ""),
-            "qty": int(qty),
+            "qty": qty_i,
+            "unit_price_ex_vat": unit_ex,
+            "unit_price_inc_vat": round(unit_inc, 2),
             "line_total_inc_vat": line_total,
         })
 
+        # For guest RPC insert (RPC will insert these into order_items too)
         line_items_for_rpc.append({
             "product_id": int(p["id"]),
             "product_name": p.get("name", ""),
-            "qty": int(qty),
+            "qty": qty_i,
+            "unit_price_ex_vat": unit_ex,
+            "unit_price_inc_vat": round(unit_inc, 2),
             "line_total": line_total,
         })
 
@@ -167,6 +180,8 @@ def render_checkout(supabase, customer_row=None, session=None):
                     "product_id": li["product_id"],
                     "product_name_snapshot": li["product_name_snapshot"],
                     "qty": li["qty"],
+                    "unit_price_ex_vat": li["unit_price_ex_vat"],
+                    "unit_price_inc_vat": li["unit_price_inc_vat"],
                     "line_total_inc_vat": li["line_total_inc_vat"],
                 }).execute()
 
