@@ -3,6 +3,8 @@ from auth_client import SupabaseAuth
 from supabase_client import SupabaseClient
 from profile import ensure_customer_profile, friendly_auth_error, require_profile_completion, render_customer_dashboard
 import customer_portal
+import maintenance_gate
+maintenance_gate.customer_maintenance_gate()
 
 st.set_page_config(page_title="Wivey Bakery", layout="wide")
 
