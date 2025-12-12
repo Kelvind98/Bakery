@@ -1,20 +1,12 @@
 import streamlit as st
 
 def customer_maintenance_gate():
-    """Blocks the customer app when CUSTOMER_MAINTENANCE_MODE is true.
-
-    Configure in Streamlit Cloud (Settings -> Secrets):
-      CUSTOMER_MAINTENANCE_MODE = true/false
-      CUSTOMER_MAINTENANCE_PIN = "1234"
-      CUSTOMER_MAINTENANCE_EMAIL = "wiveybakery@outlook.com"
-    """
+    # IMPORTANT: do NOT call st.set_page_config() in here
     if not st.secrets.get("CUSTOMER_MAINTENANCE_MODE", False):
         return
 
     pin_required = str(st.secrets.get("CUSTOMER_MAINTENANCE_PIN", ""))
     email = st.secrets.get("CUSTOMER_MAINTENANCE_EMAIL", "wiveybakery@outlook.com")
-
-    st.set_page_config(page_title="Wivey Bakery", layout="centered")
 
     st.markdown("## 🛠 Website under maintenance")
     st.write("Please try again later.")
