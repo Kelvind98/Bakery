@@ -15,8 +15,6 @@ supabase = SupabaseClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 if "auth_session" not in st.session_state:
     st.session_state["auth_session"] = None
-if "guest_mode" not in st.session_state:
-    st.session_state["guest_mode"] = False
 if "pending_marketing_opt_in" not in st.session_state:
     st.session_state["pending_marketing_opt_in"] = False
 
@@ -27,7 +25,7 @@ customer_portal.render_cart_sidebar(supabase)
 def render_login_panel():
     sess = st.session_state.get("auth_session")
     if sess and sess.get("access_token"):
-        colA, colB = st.columns([4,1])
+        colA, colB = st.columns([4, 1])
         with colA:
             st.caption(f"Logged in as {sess.get('user',{}).get('email','')}")
         with colB:
@@ -37,7 +35,6 @@ def render_login_panel():
                 except Exception:
                     pass
                 st.session_state["auth_session"] = None
-                st.session_state["guest_mode"] = False
                 supabase.set_auth(None)
                 st.rerun()
         return True
@@ -52,7 +49,6 @@ def render_login_panel():
                 r = auth.sign_in(email, pw)
                 if r.ok:
                     st.session_state["auth_session"] = r.json()
-                    st.session_state["guest_mode"] = False
                     st.success("Logged in")
                     st.rerun()
                 else:
@@ -71,7 +67,6 @@ def render_login_panel():
                     if r.ok:
                         st.session_state["pending_marketing_opt_in"] = bool(marketing)
                         st.session_state["auth_session"] = r.json()
-                        st.session_state["guest_mode"] = False
                         st.success("Account created. Check your email if confirmation is required.")
                         st.rerun()
                     else:
@@ -90,7 +85,8 @@ def render_login_panel():
                         st.error("Could not send reset link. Please try again.")
 
     if st.button("Continue as guest", use_container_width=True):
-        st.session_state["guest_mode"] = True
+        st.session_state["auth_session"] = None
+        supabase.set_auth(None)
         st.rerun()
 
     return False
@@ -107,10 +103,7 @@ if session and session.get("access_token"):
         st.stop()
     require_profile_completion(supabase, customer)
 
-if logged_in:
-    page = st.radio("Pages", ["Menu", "Checkout", "Tracking", "My Orders", "My Account"], horizontal=True)
-else:
-    page = st.radio("Pages", ["Menu", "Checkout", "Tracking"], horizontal=True)
+page = st.radio("Pages", ["Menu", "Checkout", "Tracking"] + (["My Orders", "My Account"] if logged_in else []), horizontal=True)
 
 if page == "Menu":
     customer_portal.render_menu(supabase, customer)

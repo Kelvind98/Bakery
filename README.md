@@ -1,16 +1,11 @@
-# Wivey Bakery — Customer App (Supabase Auth)
+# Wivey Bakery — Customer App (v6)
 
-Includes:
-- Supabase Auth login/signup/reset (no supabase-py)
-- Full menu with search + allergen hiding
-- Cart + Checkout (pickup/delivery + notes + payment type)
-- My Orders + Reorder
-- Order Tracking (guest compatible via RPC `track_order_by_code`)
-- My Account dashboard (address/allergies/contact)
+This version fixes the issue where order items were not attaching to orders.
 
-## Streamlit Secrets
-```toml
-SUPABASE_URL = "https://YOURPROJECT.supabase.co"
-SUPABASE_ANON_KEY = "YOUR_PUBLIC_ANON_KEY"
-AUTH_REDIRECT_URL = "https://YOUR-APP.streamlit.app"
-```
+- Logged-in checkout: inserts into `orders` then inserts into `order_items` for that `order_id`
+- Guest checkout: uses secure RPC `guest_create_order` (order + items inserted server-side)
+
+DB prerequisites:
+- RPC: `guest_create_order(...)` granted to anon
+- RPC: `track_order_by_code(text)` granted to anon
+- RLS policies: authenticated insert/select on orders + order_items

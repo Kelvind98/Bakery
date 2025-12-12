@@ -23,18 +23,14 @@ def ensure_customer_profile(supabase, session):
     auth_id = user.get("id")
     email = user.get("email")
     token = session.get("access_token")
-
     if not auth_id or not token:
         return None
-
     supabase.set_auth(token)
 
-    # 1) select first
     existing = supabase.table("customers").select("*").eq("auth_user_id", auth_id).limit(1).execute()
     if existing:
         return existing[0]
 
-    # 2) link by email if old row exists
     try:
         by_email = supabase.table("customers").select("*").eq("email", email).is_("auth_user_id", None).limit(1).execute()
         if by_email:
@@ -44,7 +40,6 @@ def ensure_customer_profile(supabase, session):
     except Exception:
         pass
 
-    # 3) create new (handle 409 by fallback select)
     try:
         created = supabase.table("customers").insert({
             "auth_user_id": auth_id,

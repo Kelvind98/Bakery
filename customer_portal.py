@@ -1,10 +1,6 @@
 import streamlit as st
 from ui_text import TERMS_AND_CONDITIONS, STATUS_HELP
 
-# -----------------------
-# Helpers
-# -----------------------
-
 def _cart():
     return st.session_state.setdefault("cart", {})  # {product_id: qty}
 
@@ -27,20 +23,14 @@ def render_terms_checkbox(key="terms_ok"):
     st.markdown(TERMS_AND_CONDITIONS)
     return st.checkbox("I agree to the Terms & Conditions", key=key)
 
-# -----------------------
-# Menu
-# -----------------------
-
 def render_menu(supabase, customer_row=None):
     st.subheader("Menu")
-
     q = st.text_input("Search", placeholder="Search items...")
     query = supabase.table("products").select("*").eq("is_active", True).order("name")
-
     if q.strip():
         query = query.ilike("name", f"*{q.strip()}*")
-
     products = query.execute()
+
     allergies = customer_row.get("allergies") if customer_row else None
     products = _hide_allergenic_products(products, allergies)
 
@@ -49,12 +39,10 @@ def render_menu(supabase, customer_row=None):
         return
 
     cart = _cart()
-
     for p in products:
         pid = str(p["id"])
         with st.container(border=True):
             cols = st.columns([3, 1])
-
             with cols[0]:
                 st.markdown(f"**{p.get('name', 'Item')}**")
                 if p.get("description"):
@@ -63,33 +51,20 @@ def render_menu(supabase, customer_row=None):
                     st.image(p["image_url"], use_container_width=True)
                 if p.get("allergens"):
                     st.caption("Allergens: " + ", ".join(p["allergens"]))
-
             with cols[1]:
                 price = float(p.get("recommended_price_inc_vat") or p.get("price_inc_vat") or p.get("price") or 0)
                 st.markdown(f"**£{price:.2f}**")
-                qty = st.number_input(
-                    "Qty",
-                    min_value=0,
-                    max_value=50,
-                    value=int(cart.get(pid, 0)),
-                    key=f"qty_{pid}",
-                )
+                qty = st.number_input("Qty", 0, 50, int(cart.get(pid, 0)), key=f"qty_{pid}")
                 if qty > 0:
                     cart[pid] = int(qty)
                 else:
                     cart.pop(pid, None)
-
     st.session_state["cart"] = cart
-
-# -----------------------
-# Cart Sidebar
-# -----------------------
 
 def render_cart_sidebar(supabase):
     with st.sidebar:
         st.markdown("## Cart")
         cart = _cart()
-
         if not cart:
             st.caption("Your cart is empty.")
             return
@@ -103,19 +78,13 @@ def render_cart_sidebar(supabase):
             if not p:
                 continue
             price = float(p.get("recommended_price_inc_vat") or 0)
-            line = price * qty
-            total += line
-            st.write(f"{qty} × {p['name']} — £{line:.2f}")
+            total += price * qty
+            st.write(f"{qty} × {p['name']} — £{price*qty:.2f}")
 
         st.markdown(f"### Total: £{total:.2f}")
-
         if st.button("Clear cart", use_container_width=True):
             clear_cart()
             st.rerun()
-
-# -----------------------
-# Checkout  ✅ (THIS FIXES YOUR ERROR)
-# -----------------------
 
 def render_checkout(supabase, customer_row=None, session=None):
     st.subheader("Checkout")
@@ -128,7 +97,6 @@ def render_checkout(supabase, customer_row=None, session=None):
     order_type = st.radio("Pickup or Delivery?", ["pickup", "delivery"], horizontal=True)
     if order_type == "delivery":
         st.caption("Delivery zone: Wiveliscombe only.")
-
     payment_method = st.selectbox("Payment method", ["cash", "card", "gift_card"])
     notes = st.text_area("Order notes (optional)")
 
@@ -137,88 +105,98 @@ def render_checkout(supabase, customer_row=None, session=None):
         st.warning("You must accept Terms & Conditions to place an order.")
         return
 
-    # calculate total
     products = supabase.table("products").select("id,name,recommended_price_inc_vat").execute()
     prod_map = {str(p["id"]): p for p in products}
 
     total = 0.0
-    line_items = []
+    line_items_for_db = []
+    line_items_for_rpc = []
+
     for pid, qty in cart.items():
         p = prod_map.get(pid)
         if not p:
             continue
         price = float(p.get("recommended_price_inc_vat") or 0)
-        total += price * qty
-        line_items.append({
+        line_total = round(price * int(qty), 2)
+        total += line_total
+
+        line_items_for_db.append({
             "product_id": int(p["id"]),
             "product_name_snapshot": p.get("name", ""),
             "qty": int(qty),
-            "unit_price_inc_vat": price,
+            "line_total_inc_vat": line_total,
+        })
+
+        line_items_for_rpc.append({
+            "product_id": int(p["id"]),
+            "product_name": p.get("name", ""),
+            "qty": int(qty),
+            "line_total": line_total,
         })
 
     st.markdown(f"### Total: £{total:.2f}")
 
-    gift_code = None
     if payment_method == "gift_card":
-        gift_code = st.text_input("Gift card code")
+        st.text_input("Gift card code (processed by staff)")
+
+    is_logged_in = bool(session and session.get("access_token") and session.get("user"))
 
     if st.button("Place order", use_container_width=True):
-        payload = {
-            "order_type": order_type,
-            "payment_method": payment_method,
-            "status": "pending",
-            "total_inc_vat": round(total, 2),
-            "order_notes": notes.strip() if notes else None,
-        }
+        if is_logged_in and customer_row:
+            payload = {
+                "order_type": order_type,
+                "payment_method": payment_method,
+                "status": "pending",
+                "total_inc_vat": round(total, 2),
+                "order_notes": notes.strip() if notes else None,
+                "customer_id": int(customer_row["id"]),
+                "customer_auth_user_id": session["user"]["id"],
+                "customer_email_snapshot": session["user"].get("email"),
+                "customer_phone_snapshot": customer_row.get("phone"),
+            }
+            created = supabase.table("orders").insert(payload).execute()
+            if not created:
+                st.error("Order could not be created.")
+                return
+            order = created[0]
+            oid = order["id"]
 
-        # attach customer info if logged in
-        if session and session.get("user") and customer_row:
-            payload["customer_id"] = int(customer_row["id"])
-            payload["customer_auth_user_id"] = session["user"]["id"]
-            payload["customer_email_snapshot"] = session["user"].get("email")
-            payload["customer_phone_snapshot"] = customer_row.get("phone")
+            for li in line_items_for_db:
+                supabase.table("order_items").insert({
+                    "order_id": oid,
+                    "product_id": li["product_id"],
+                    "product_name_snapshot": li["product_name_snapshot"],
+                    "qty": li["qty"],
+                    "line_total_inc_vat": li["line_total_inc_vat"],
+                }).execute()
 
-        created = supabase.table("orders").insert(payload).execute()
-        if not created:
-            st.error("Order could not be created.")
-            return
+            clear_cart()
+            st.session_state["last_order_code"] = order.get("order_code")
+            st.success(f"Order placed! Your order code is: {order.get('order_code', '(code pending)')}")
+            st.rerun()
 
-        order = created[0]
-        oid = order["id"]
+        else:
+            result = supabase.rpc("guest_create_order", {
+                "p_order_type": order_type,
+                "p_payment_method": payment_method,
+                "p_total_inc_vat": round(total, 2),
+                "p_order_notes": notes.strip() if notes else None,
+                "p_items": line_items_for_rpc,
+            })
+            if not result:
+                st.error("Order could not be created.")
+                return
+            order = result[0] if isinstance(result, list) else result
 
-        for li in line_items:
-            supabase.table("order_items").insert({
-                "order_id": oid,
-                "product_id": li["product_id"],
-                "product_name_snapshot": li["product_name_snapshot"],
-                "qty": li["qty"],
-                "line_total_inc_vat": round(li["unit_price_inc_vat"] * li["qty"], 2),
-            }).execute()
-
-        if gift_code:
-            st.info("Gift card will be validated/processed by staff if needed.")
-
-        clear_cart()
-        st.success(f"Order placed! Your order code is: {order.get('order_code', '(code pending)')}")
-        st.session_state["last_order_code"] = order.get("order_code")
-        st.rerun()
-
-# -----------------------
-# My Orders
-# -----------------------
+            clear_cart()
+            st.session_state["last_order_code"] = order.get("order_code")
+            st.success(f"Order placed! Your order code is: {order.get('order_code', '(code pending)')}")
+            st.rerun()
 
 def render_my_orders(supabase, session):
     st.subheader("My Orders")
-
     uid = session["user"]["id"]
-    orders = (
-        supabase.table("orders")
-        .select("*")
-        .eq("customer_auth_user_id", uid)
-        .order("created_at", desc=True)
-        .execute()
-    )
-
+    orders = supabase.table("orders").select("*").eq("customer_auth_user_id", uid).order("created_at", desc=True).limit(200).execute()
     if not orders:
         st.info("No orders yet.")
         return
@@ -231,7 +209,6 @@ def render_my_orders(supabase, session):
             st.caption(STATUS_HELP.get(status, ""))
 
             items = supabase.table("order_items").select("*").eq("order_id", o["id"]).execute()
-
             with st.expander("Items"):
                 for it in items:
                     st.write(f"{it.get('qty')} × {it.get('product_name_snapshot')}")
@@ -246,15 +223,10 @@ def render_my_orders(supabase, session):
                 st.success("Items added to cart.")
                 st.rerun()
 
-# -----------------------
-# Tracking (guest-safe via RPC)
-# -----------------------
-
 def render_tracking(supabase):
     st.subheader("Order Tracking")
     default_code = st.session_state.get("last_order_code", "")
     code = st.text_input("Enter your order code", value=default_code)
-
     if not code.strip():
         st.info("Enter an order code to view status.")
         return
@@ -280,4 +252,3 @@ def render_tracking(supabase):
     if order.get("slot_start"):
         st.write(f"Slot: {order.get('slot_start')} → {order.get('slot_end')}")
     st.write(f"Total: £{float(order.get('total_inc_vat') or 0):.2f}")
-
