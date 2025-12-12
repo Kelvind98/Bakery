@@ -1,7 +1,7 @@
 import streamlit as st
 from ui_text import TERMS_AND_CONDITIONS, STATUS_HELP
 
-VAT_DEFAULT = 20.0  # used only to compute ex-VAT unit prices for order_items rows
+VAT_DEFAULT = 20.0  # fallback if product vat not present
 
 def _cart():
     return st.session_state.setdefault("cart", {})  # {product_id: qty}
@@ -54,8 +54,8 @@ def render_menu(supabase, customer_row=None):
                 if p.get("allergens"):
                     st.caption("Allergens: " + ", ".join(p["allergens"]))
             with cols[1]:
-                price = float(p.get("recommended_price_inc_vat") or p.get("price_inc_vat") or p.get("price") or 0)
-                st.markdown(f"**£{price:.2f}**")
+                price_inc = float(p.get("recommended_price_inc_vat") or 0)
+                st.markdown(f"**£{price_inc:.2f}**")
                 qty = st.number_input("Qty", 0, 50, int(cart.get(pid, 0)), key=f"qty_{pid}")
                 if qty > 0:
                     cart[pid] = int(qty)
@@ -79,17 +79,23 @@ def render_cart_sidebar(supabase):
             p = prod_map.get(pid)
             if not p:
                 continue
-            price = float(p.get("recommended_price_inc_vat") or 0)
-            total += price * qty
-            st.write(f"{qty} × {p['name']} — £{price*qty:.2f}")
+            unit_inc = float(p.get("recommended_price_inc_vat") or 0)
+            total += unit_inc * qty
+            st.write(f"{qty} × {p['name']} — £{unit_inc*qty:.2f}")
 
         st.markdown(f"### Total: £{total:.2f}")
         if st.button("Clear cart", use_container_width=True):
             clear_cart()
             st.rerun()
 
-def _compute_unit_ex_vat(unit_inc_vat: float, vat_percent: float) -> float:
-    return round(unit_inc_vat / (1.0 + (vat_percent / 100.0)), 2)
+def _calc_prices(unit_inc_vat: float, vat_rate: float, qty: int):
+    unit_inc = round(float(unit_inc_vat), 2)
+    vat = float(vat_rate)
+    unit_ex = round(unit_inc / (1.0 + vat/100.0), 2)
+    line_ex = round(unit_ex * qty, 2)
+    line_inc = round(unit_inc * qty, 2)
+    line_vat = round(line_inc - line_ex, 2)
+    return unit_ex, unit_inc, line_ex, line_vat, line_inc
 
 def render_checkout(supabase, customer_row=None, session=None):
     st.subheader("Checkout")
@@ -110,7 +116,7 @@ def render_checkout(supabase, customer_row=None, session=None):
         st.warning("You must accept Terms & Conditions to place an order.")
         return
 
-    products = supabase.table("products").select("id,name,recommended_price_inc_vat").execute()
+    products = supabase.table("products").select("id,name,recommended_price_inc_vat,vat_percent").execute()
     prod_map = {str(p["id"]): p for p in products}
 
     total = 0.0
@@ -123,28 +129,34 @@ def render_checkout(supabase, customer_row=None, session=None):
             continue
         qty_i = int(qty)
         unit_inc = float(p.get("recommended_price_inc_vat") or 0)
-        unit_ex = _compute_unit_ex_vat(unit_inc, VAT_DEFAULT)
-        line_total = round(unit_inc * qty_i, 2)
-        total += line_total
+        vat_rate = float(p.get("vat_percent") or VAT_DEFAULT)
 
-        # For normal DB insert (must include unit_price_ex_vat because it's NOT NULL in your schema)
-        line_items_for_db.append({
+        unit_ex, unit_inc, line_ex, line_vat, line_inc = _calc_prices(unit_inc, vat_rate, qty_i)
+        total += line_inc
+
+        li = {
             "product_id": int(p["id"]),
             "product_name_snapshot": p.get("name", ""),
             "qty": qty_i,
             "unit_price_ex_vat": unit_ex,
-            "unit_price_inc_vat": round(unit_inc, 2),
-            "line_total_inc_vat": line_total,
-        })
+            "vat_rate": round(vat_rate, 2),
+            "line_total_ex_vat": line_ex,
+            "line_vat": line_vat,
+            "line_total_inc_vat": line_inc,
+            "unit_price_inc_vat": unit_inc,
+        }
+        line_items_for_db.append(li)
 
-        # For guest RPC insert (RPC will insert these into order_items too)
         line_items_for_rpc.append({
-            "product_id": int(p["id"]),
-            "product_name": p.get("name", ""),
-            "qty": qty_i,
-            "unit_price_ex_vat": unit_ex,
-            "unit_price_inc_vat": round(unit_inc, 2),
-            "line_total": line_total,
+            "product_id": li["product_id"],
+            "product_name": li["product_name_snapshot"],
+            "qty": li["qty"],
+            "unit_price_ex_vat": li["unit_price_ex_vat"],
+            "vat_rate": li["vat_rate"],
+            "line_total_ex_vat": li["line_total_ex_vat"],
+            "line_vat": li["line_vat"],
+            "line_total_inc_vat": li["line_total_inc_vat"],
+            "unit_price_inc_vat": li["unit_price_inc_vat"],
         })
 
     st.markdown(f"### Total: £{total:.2f}")
@@ -161,7 +173,7 @@ def render_checkout(supabase, customer_row=None, session=None):
                 "payment_method": payment_method,
                 "status": "pending",
                 "total_inc_vat": round(total, 2),
-                "order_notes": notes.strip() if notes else None,
+                "order_notes": (notes or "").strip() or None,
                 "customer_id": int(customer_row["id"]),
                 "customer_auth_user_id": session["user"]["id"],
                 "customer_email_snapshot": session["user"].get("email"),
@@ -177,12 +189,7 @@ def render_checkout(supabase, customer_row=None, session=None):
             for li in line_items_for_db:
                 supabase.table("order_items").insert({
                     "order_id": oid,
-                    "product_id": li["product_id"],
-                    "product_name_snapshot": li["product_name_snapshot"],
-                    "qty": li["qty"],
-                    "unit_price_ex_vat": li["unit_price_ex_vat"],
-                    "unit_price_inc_vat": li["unit_price_inc_vat"],
-                    "line_total_inc_vat": li["line_total_inc_vat"],
+                    **li
                 }).execute()
 
             clear_cart()
@@ -195,7 +202,7 @@ def render_checkout(supabase, customer_row=None, session=None):
                 "p_order_type": order_type,
                 "p_payment_method": payment_method,
                 "p_total_inc_vat": round(total, 2),
-                "p_order_notes": notes.strip() if notes else None,
+                "p_order_notes": (notes or "").strip() or None,
                 "p_items": line_items_for_rpc,
             })
             if not result:
