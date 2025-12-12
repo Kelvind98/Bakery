@@ -1,17 +1,17 @@
 import requests
 
 class SupabaseAuth:
-    def __init__(self, url, anon_key):
+    def __init__(self, url: str, anon_key: str):
         self.url = url.rstrip("/")
         self.anon_key = anon_key
 
-    def _headers(self, token=None):
+    def _headers(self, token: str | None = None):
         h = {"apikey": self.anon_key, "Content-Type": "application/json"}
         if token:
             h["Authorization"] = f"Bearer {token}"
         return h
 
-    def sign_up(self, email, password):
+    def sign_up(self, email: str, password: str):
         return requests.post(
             f"{self.url}/auth/v1/signup",
             headers=self._headers(),
@@ -19,7 +19,7 @@ class SupabaseAuth:
             timeout=30,
         )
 
-    def sign_in(self, email, password):
+    def sign_in(self, email: str, password: str):
         return requests.post(
             f"{self.url}/auth/v1/token?grant_type=password",
             headers=self._headers(),
@@ -27,7 +27,14 @@ class SupabaseAuth:
             timeout=30,
         )
 
-    def send_reset(self, email, redirect_to):
+    def sign_out(self, access_token: str):
+        return requests.post(
+            f"{self.url}/auth/v1/logout",
+            headers=self._headers(access_token),
+            timeout=30,
+        )
+
+    def send_reset(self, email: str, redirect_to: str):
         return requests.post(
             f"{self.url}/auth/v1/recover",
             headers=self._headers(),
