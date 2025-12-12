@@ -1,33 +1,70 @@
 import requests
 
 class SupabaseClient:
-    def __init__(self, supabase_url: str, anon_key: str):
-        self.url = supabase_url.rstrip("/")
+    def __init__(self, url, anon_key):
+        self.url = url.rstrip("/")
         self.anon_key = anon_key
-        self._access_token = None
+        self.token = None
 
-    def set_auth(self, access_token: str | None):
-        self._access_token = access_token
+    def set_auth(self, token):
+        self.token = token
 
     def _headers(self):
         h = {"apikey": self.anon_key, "Content-Type": "application/json"}
-        if self._access_token:
-            h["Authorization"] = f"Bearer {self._access_token}"
+        if self.token:
+            h["Authorization"] = f"Bearer {self.token}"
         return h
 
-    def select(self, table: str, select: str="*", params: dict | None=None):
-        params = params or {}
-        params.setdefault("select", select)
-        return requests.get(f"{self.url}/rest/v1/{table}", headers=self._headers(), params=params, timeout=30)
+    def table(self, name):
+        return Table(self, name)
 
-    def insert(self, table: str, payload):
-        # Prefer return=representation if you later want created rows
-        headers = self._headers() | {"Prefer": "return=representation"}
-        return requests.post(f"{self.url}/rest/v1/{table}", headers=headers, json=payload, timeout=30)
+class Table:
+    def __init__(self, client, name):
+        self.client = client
+        self.name = name
+        self.filters = []
+        self.payload = None
+        self.method = "GET"
 
-    def update(self, table: str, payload: dict, params: dict):
-        headers = self._headers() | {"Prefer": "return=representation"}
-        return requests.patch(f"{self.url}/rest/v1/{table}", headers=headers, params=params, json=payload, timeout=30)
+    def select(self, cols="*"):
+        self.method = "GET"
+        self.cols = cols
+        return self
 
-    def rpc(self, fn: str, payload: dict):
-        return requests.post(f"{self.url}/rest/v1/rpc/{fn}", headers=self._headers(), json=payload, timeout=30)
+    def insert(self, payload):
+        self.method = "POST"
+        self.payload = payload
+        return self
+
+    def update(self, payload):
+        self.method = "PATCH"
+        self.payload = payload
+        return self
+
+    def eq(self, col, val):
+        self.filters.append(f"{col}=eq.{val}")
+        return self
+
+    def is_(self, col, val):
+        v = "null" if val is None else val
+        self.filters.append(f"{col}=is.{v}")
+        return self
+
+    def limit(self, n):
+        self.filters.append(f"limit={n}")
+        return self
+
+    def execute(self):
+        url = f"{self.client.url}/rest/v1/{self.name}"
+        if self.method == "GET":
+            params = {"select": self.cols}
+            if self.filters:
+                url += "?" + "&".join(self.filters)
+            r = requests.get(url, headers=self.client._headers(), params=params)
+        elif self.method == "POST":
+            r = requests.post(url, headers=self.client._headers(), json=self.payload)
+        elif self.method == "PATCH":
+            url += "?" + "&".join(self.filters)
+            r = requests.patch(url, headers=self.client._headers(), json=self.payload)
+        r.raise_for_status()
+        return r.json()
