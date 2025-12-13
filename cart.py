@@ -1,5 +1,5 @@
 import streamlit as st
-from utils.catalog import display_price_ex_vat
+from catalog import display_price_ex_vat
 
 def cart_add(product_id: int, qty: int = 1):
     cart = st.session_state.cart
