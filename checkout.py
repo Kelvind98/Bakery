@@ -3,9 +3,11 @@ from catalog import fetch_products
 from cart import cart_totals, cart_set, cart_clear
 from supabase_client import get_client
 
+
 def _products_by_id():
     prods = fetch_products()
     return {int(p["id"]): p for p in prods}
+
 
 def _get_user(sb):
     try:
@@ -13,13 +15,21 @@ def _get_user(sb):
     except Exception:
         return None
 
+
 def _get_profile(sb, uid):
-    # Returns customer row or None
     try:
-        rows = sb.table("customers").select("id,full_name,phone,address,email").eq("auth_user_id", uid).limit(1).execute().data
+        rows = (
+            sb.table("customers")
+            .select("id,full_name,phone,address,email")
+            .eq("auth_user_id", uid)
+            .limit(1)
+            .execute()
+            .data
+        )
         return rows[0] if rows else None
     except Exception:
         return None
+
 
 def page_checkout(logged_in: bool = False):
     st.header("🧺 Checkout")
@@ -27,7 +37,7 @@ def page_checkout(logged_in: bool = False):
     sb = get_client()
     products_by_id = _products_by_id()
 
-    items, subtotal = cart_totals(products_by_id)
+    items, _subtotal = cart_totals(products_by_id)
     if not items:
         st.info("Your cart is empty. Go back to Shop to add items.")
         return
@@ -78,12 +88,12 @@ def page_checkout(logged_in: bool = False):
         with st.expander("Add/update your address (optional)"):
             st.text_area("Address", value=default_address, height=90, key="pickup_address_optional")
 
-    # Promo code (stored in notes for now)
+    # Discounts + gift cards
     promo_code = st.text_input("Promo code (optional)", placeholder="e.g. WIVEY10").strip().upper()
+    gift_card_code = st.text_input("Gift card code (optional)", placeholder="e.g. GC-1234-ABCD").strip().upper()
 
     notes = st.text_area("Notes (optional)", height=80)
 
-    # Build secure payload for RPC
     rpc_items = [{"product_id": i["product_id"], "qty": i["qty"]} for i in items]
 
     # Validation
@@ -98,32 +108,32 @@ def page_checkout(logged_in: bool = False):
     if errors:
         st.warning(" • " + "\n • ".join(errors))
 
-    disabled = bool(errors)
-    if st.button("Place order", type="primary", disabled=disabled):
+    if st.button("Place order", type="primary", disabled=bool(errors)):
         try:
             # If logged in, ensure profile exists and save phone (and address if provided)
             if uid:
                 try:
-                    sb.rpc("ensure_customer_profile", {
-                        "p_full_name": (profile.get("full_name") if profile else None),
-                        "p_phone": customer_phone or None,
-                        "p_marketing_consent": False
-                    }).execute()
+                    sb.rpc(
+                        "ensure_customer_profile",
+                        {
+                            "p_full_name": (profile.get("full_name") if profile else None),
+                            "p_phone": customer_phone or None,
+                            "p_marketing_consent": False,
+                        },
+                    ).execute()
                 except Exception:
                     pass
 
-                # Save address into customers table (RLS allows self-update)
-                addr_to_save = delivery_address if order_type == "delivery" else (st.session_state.get("pickup_address_optional") or "").strip()
+                addr_to_save = (
+                    delivery_address
+                    if order_type == "delivery"
+                    else (st.session_state.get("pickup_address_optional") or "").strip()
+                )
                 if addr_to_save:
                     try:
                         sb.table("customers").update({"address": addr_to_save}).eq("auth_user_id", uid).execute()
                     except Exception:
                         pass
-
-            # Store promo code in customer notes for now (DB discount logic can be added later)
-            final_notes = (notes or "").strip()
-            if promo_code:
-                final_notes = (f"[PROMO:{promo_code}] " + final_notes).strip()
 
             payload = {
                 "p_items": rpc_items,
@@ -133,15 +143,27 @@ def page_checkout(logged_in: bool = False):
                 "p_customer_email": customer_email,
                 "p_customer_phone": customer_phone,
                 "p_delivery_address": (delivery_address or None),
-                "p_customer_notes": (final_notes or None),
+                "p_customer_notes": (notes.strip() or None),
+                "p_discount_code": (promo_code or None),
+                "p_gift_card_code": (gift_card_code or None),
             }
+
             resp = sb.rpc("guest_create_order", payload).execute()
-            data = resp.data
+            data = resp.data or {}
+
             st.session_state.last_order = data
             cart_clear()
-            st.success(f"Order placed! Your tracking code is: {data['order_code']}")
-            if promo_code:
-                st.info("Promo code saved with your order. (Automatic discount calculation can be enabled next.)")
+
+            st.success(f"Order placed! Your tracking code is: {data.get('order_code','')}")
+            if float(data.get("discount_total", 0) or 0) > 0:
+                st.info(f"Discount applied: £{float(data['discount_total']):.2f}")
+            if float(data.get("gift_card_applied", 0) or 0) > 0:
+                st.info(f"Gift card applied: £{float(data['gift_card_applied']):.2f}")
+            if float(data.get("amount_due", 0) or 0) > 0:
+                st.warning(f"Amount due on collection/delivery: £{float(data['amount_due']):.2f}")
+            else:
+                st.success("Paid in full (gift card covered the total).")
+
             st.caption("Use Track order in the sidebar to check progress.")
         except Exception as e:
             st.error("Order failed.")
