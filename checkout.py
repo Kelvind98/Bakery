@@ -7,7 +7,7 @@ def _products_by_id():
     prods = fetch_products()
     return {int(p["id"]): p for p in prods}
 
-def page_checkout():
+def page_checkout(logged_in: bool = False):
     st.header("🧺 Checkout")
 
     sb = get_client()
@@ -38,7 +38,6 @@ def page_checkout():
 
     st.subheader("Order details")
     order_type = st.radio("Order type", ["pickup", "delivery"], horizontal=True)
-    slot_start = st.text_input("Preferred date/time (optional)", placeholder="e.g. 2025-12-14 10:30")
     customer_email = st.text_input("Email (for tracking)", placeholder="you@example.com")
     customer_phone = st.text_input("Phone (optional)")
     delivery_address = ""
@@ -46,16 +45,21 @@ def page_checkout():
         delivery_address = st.text_area("Delivery address", height=80)
     notes = st.text_area("Notes (optional)", height=80)
 
-    st.info("Totals shown at checkout are calculated securely in the database when you place the order.")
-
-    # Build payload for RPC
     rpc_items = [{"product_id": i["product_id"], "qty": i["qty"]} for i in items]
 
     disabled = not customer_email.strip()
     if st.button("Place order", type="primary", disabled=disabled):
         try:
-            # Optional: parse slot input if user typed something
-            # Keep simple: send nulls unless you later implement slot picker
+            if logged_in:
+                try:
+                    sb.rpc("ensure_customer_profile", {
+                        "p_full_name": None,
+                        "p_phone": customer_phone.strip() or None,
+                        "p_marketing_consent": False
+                    }).execute()
+                except Exception:
+                    pass
+
             payload = {
                 "p_items": rpc_items,
                 "p_order_type": order_type,
@@ -76,4 +80,4 @@ def page_checkout():
             st.error("Order failed.")
             st.exception(e)
 
-    st.caption("Email is required so we can help you if there’s an issue and so you can track your order.")
+    st.caption("Email is required so we can help you and so you can track your order.")
