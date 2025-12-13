@@ -1,5 +1,5 @@
 import streamlit as st
-from utils.supabase_client import get_client
+from supabase_client import get_client
 
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_categories():
