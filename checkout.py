@@ -1,6 +1,6 @@
 import streamlit as st
 from catalog import fetch_products
-from cart import cart_items
+from cart import cart_totals, cart_set, cart_clear
 from supabase_client import get_client
 
 def _products_by_id():
