@@ -1,23 +1,9 @@
 import streamlit as st
 from supabase_client import get_client
 
-def _restore_session(sb):
-    tokens = st.session_state.get("sb_tokens")
-    if not tokens:
-        return
-    access = tokens.get("access_token")
-    refresh = tokens.get("refresh_token")
-    if access and refresh:
-        try:
-            sb.auth.set_session(access_token=access, refresh_token=refresh)
-        except TypeError:
-            sb.auth.set_session(access, refresh)
-        except Exception:
-            st.session_state.sb_tokens = None
 
 def auth_sidebar():
     sb = get_client()
-    _restore_session(sb)
 
     st.sidebar.subheader("Account")
 
@@ -61,8 +47,6 @@ def auth_sidebar():
         password2 = st.text_input("Password", type="password", key="signup_password")
         if st.button("Sign up", key="signup_btn"):
             sb.auth.sign_up({"email": email2, "password": password2})
-            st.sidebar.info(
-                "Account created. If email confirmation is enabled in Supabase, confirm your email before logging in."
-            )
+            st.sidebar.info("Account created. If email confirmation is enabled, confirm email before logging in.")
 
     return False
