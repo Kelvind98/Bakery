@@ -1,11 +1,30 @@
-# Wivey Bakery — Customer App (v6)
+# Wivey Bakery Customer App (Streamlit + Supabase)
 
-This version fixes the issue where order items were not attaching to orders.
+This customer-facing app is designed to run on Streamlit Cloud from GitHub.
 
-- Logged-in checkout: inserts into `orders` then inserts into `order_items` for that `order_id`
-- Guest checkout: uses secure RPC `guest_create_order` (order + items inserted server-side)
+## What it uses
+- Supabase **anon** key only (safe for public app)
+- RPC-only writes:
+  - `guest_create_order`
+  - `track_order_by_code`
+  - `ensure_customer_profile` (optional if you later add login)
 
-DB prerequisites:
-- RPC: `guest_create_order(...)` granted to anon
-- RPC: `track_order_by_code(text)` granted to anon
-- RLS policies: authenticated insert/select on orders + order_items
+## Setup (Streamlit Cloud Secrets)
+Add these to Streamlit Cloud → App → Settings → Secrets:
+
+```toml
+SUPABASE_URL="https://YOURPROJECT.supabase.co"
+SUPABASE_ANON_KEY="YOUR_ANON_KEY"
+# Optional: used by maintenance overlay UI
+CUSTOMER_MAINTENANCE_PIN="1234"
+```
+
+The app reads public settings from the DB via RPC `get_public_settings()`:
+- `customer_maintenance_enabled`
+- `customer_contact_email`
+
+## Run locally
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```

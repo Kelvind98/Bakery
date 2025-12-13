@@ -1,3 +1,3 @@
 streamlit==1.39.0
-requests
-python-dateutil
+supabase==2.6.0
+python-dateutil==2.9.0.post0
