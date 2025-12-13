@@ -1,6 +1,6 @@
 import streamlit as st
-from utils.catalog import fetch_categories, fetch_products, display_price_ex_vat
-from utils.cart import cart_add
+from catalog import fetch_products
+from cart import cart_add
 
 def page_home():
     st.header("🥐 Wivey Bakery – Shop")
