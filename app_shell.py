@@ -6,6 +6,8 @@ from auth_ui import auth_sidebar
 from home import page_home
 from checkout import page_checkout
 from track_order import page_track_order
+from loyalty import page_loyalty
+from profile import page_profile
 
 
 def _maintenance_overlay():
@@ -42,7 +44,6 @@ def _maintenance_overlay():
 
 def run_app():
     init_state()
-
     logged_in = auth_sidebar()
 
     unlocked = bool(st.session_state.get("_maintenance_unlocked", False))
@@ -51,11 +52,15 @@ def run_app():
         st.stop()
 
     st.sidebar.title("Wivey Bakery")
-    page = st.sidebar.radio("Menu", ["Shop", "Checkout", "Track order"], index=0)
+    page = st.sidebar.radio("Menu", ["Shop", "Checkout", "Track order", "Loyalty", "Profile"], index=0)
 
     if page == "Shop":
         page_home()
     elif page == "Checkout":
         page_checkout(logged_in=logged_in)
-    else:
+    elif page == "Track order":
         page_track_order()
+    elif page == "Loyalty":
+        page_loyalty()
+    else:
+        page_profile()

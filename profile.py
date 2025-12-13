@@ -1,85 +1,56 @@
 import streamlit as st
-from supabase_client import SupabaseError
+from supabase_client import get_client
 
-ALLERGY_OPTIONS = [
-    "gluten","nuts","dairy","eggs","soy","sesame","fish","shellfish","mustard","celery","sulphites","lupin"
-]
-
-def friendly_auth_error(resp):
+def _get_user(sb):
     try:
-        j = resp.json()
-        code = str(j.get("error_code","") or j.get("code","")).lower()
-        msg = str(j.get("msg","") or j.get("message","")).lower()
+        return sb.auth.get_user().user
     except Exception:
-        code, msg = "", ""
-    if "invalid_credentials" in code or "invalid login credentials" in msg:
-        return "Details not recognized. Please check your email and password."
-    if resp.status_code == 429:
-        return "Too many attempts. Please wait a moment and try again."
-    return "Login failed. Please try again."
-
-def ensure_customer_profile(supabase, session):
-    """Ensures a customer row exists for the logged-in Supabase Auth user.
-
-    Uses a SECURITY DEFINER RPC on the database to avoid fragile RLS issues.
-    SQL for the RPC is included in this patch zip.
-    """
-    user = session.get("user", {})
-    email = user.get("email")
-    token = session.get("access_token")
-    if not email or not token:
         return None
 
-    supabase.set_auth(token)
+def page_profile():
+    st.header("👤 Profile")
 
-    try:
-        res = supabase.rpc("ensure_customer_profile", {
-            "p_email": email,
-            "p_marketing_opt_in": bool(st.session_state.get("pending_marketing_opt_in", False)),
-        })
-        if isinstance(res, list) and res:
-            return res[0]
-        if isinstance(res, dict) and res:
-            return res
-    except SupabaseError as e:
-        st.error(f"Profile RPC error: {e}")
-    except Exception as e:
-        st.error(f"Profile RPC error: {e}")
-
-    return None
-
-def render_customer_dashboard(supabase, customer_row):
-    st.subheader("My Account")
-    with st.form("account_form"):
-        full_name = st.text_input("Full name", value=customer_row.get("full_name","") or "")
-        phone = st.text_input("Phone", value=customer_row.get("phone","") or "")
-        address = st.text_area("Address", value=customer_row.get("address","") or "", height=120)
-        allergies = st.multiselect(
-            "Allergies (menu items will be hidden)",
-            ALLERGY_OPTIONS,
-            default=customer_row.get("allergies") or []
-        )
-        marketing = st.checkbox("Marketing emails (optional)", value=bool(customer_row.get("marketing_opt_in", False)))
-        save = st.form_submit_button("Save changes")
-
-    if save:
-        supabase.table("customers").update({
-            "full_name": (full_name or "").strip(),
-            "phone": (phone or "").strip(),
-            "address": (address or "").strip(),
-            "allergies": allergies,
-            "marketing_opt_in": bool(marketing),
-        }).eq("id", customer_row["id"]).execute()
-        st.success("Saved")
-        st.rerun()
-
-def require_profile_completion(supabase, customer_row):
-    missing = []
-    for k in ["full_name", "phone", "address"]:
-        if not customer_row.get(k):
-            missing.append(k)
-    if not missing:
+    sb = get_client()
+    user = _get_user(sb)
+    if not user:
+        st.info("Log in to view and edit your profile.")
         return
-    st.warning("Please complete your details to continue.")
-    render_customer_dashboard(supabase, customer_row)
-    st.stop()
+
+    uid = getattr(user, "id", None)
+    email = getattr(user, "email", "")
+
+    # Load profile row
+    rows = sb.table("customers").select("id,full_name,phone,address,marketing_consent,allergies").eq("auth_user_id", uid).limit(1).execute().data
+    cust = rows[0] if rows else None
+
+    st.write(f"**Account email:** {email}")
+
+    full_name = st.text_input("Full name", value=(cust.get("full_name") if cust else "") or "")
+    phone = st.text_input("Mobile number", value=(cust.get("phone") if cust else "") or "")
+    address = st.text_area("Address", value=(cust.get("address") if cust else "") or "", height=100)
+    marketing = st.checkbox("I want to receive offers and marketing emails", value=bool((cust.get("marketing_consent") if cust else False) or False))
+
+    allergies_raw = (cust.get("allergies") if cust else None) or []
+    if isinstance(allergies_raw, list):
+        allergies_text = ", ".join([str(x) for x in allergies_raw if x])
+    else:
+        allergies_text = str(allergies_raw)
+
+    allergies_text = st.text_input("Allergies (comma separated)", value=allergies_text)
+
+    if st.button("Save profile", type="primary"):
+        # Ensure profile exists and save core fields via RPC
+        sb.rpc("ensure_customer_profile", {
+            "p_full_name": full_name.strip() or None,
+            "p_phone": phone.strip() or None,
+            "p_marketing_consent": marketing
+        }).execute()
+
+        # Save extra fields directly (RLS allows self-update)
+        allergies_list = [a.strip() for a in allergies_text.split(",") if a.strip()]
+        sb.table("customers").update({
+            "address": address.strip() or None,
+            "allergies": allergies_list if allergies_list else None
+        }).eq("auth_user_id", uid).execute()
+
+        st.success("Profile saved.")
