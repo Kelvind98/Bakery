@@ -1,6 +1,9 @@
 import streamlit as st
-from catalog import fetch_products
+import streamlit as st
+
+from catalog import fetch_categories, fetch_products, display_price_ex_vat
 from cart import cart_add
+
 
 def page_home():
     st.header("🥐 Wivey Bakery – Shop")
@@ -34,4 +37,5 @@ def page_home():
                 if st.button("Add to cart", key=f"add_{p['id']}"):
                     cart_add(int(p["id"]), int(qty))
                     st.success("Added.")
+
     st.sidebar.caption("Go to Checkout to place your order.")
