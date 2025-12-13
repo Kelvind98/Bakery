@@ -1,5 +1,5 @@
 import streamlit as st
-from utils.supabase_client import get_client
+from supabase_client import get_client
 
 def get_public_settings():
     sb = get_client()
