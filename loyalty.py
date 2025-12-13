@@ -1,49 +1,78 @@
 import streamlit as st
 from supabase_client import get_client
 
-# Simple “offers” ladder (you can change these anytime)
+# Simple “offers” ladder (edit any time)
 OFFERS = [
-    {"points": 100, "title": "£2 off your next order", "notes": "Reward voucher applied by staff/admin later."},
-    {"points": 250, "title": "Free cookie / small treat", "notes": "Ask in-store when collecting."},
-    {"points": 500, "title": "£10 off a celebration cake", "notes": "Valid on custom cakes (subject to availability)."},
+    {"points": 100, "title": "£2 off your next order"},
+    {"points": 250, "title": "Free cookie / small treat"},
+    {"points": 500, "title": "£10 off a celebration cake"},
 ]
 
-def _get_user(sb):
-    try:
-        return sb.auth.get_user().user
-    except Exception:
-        return None
 
 def page_loyalty():
     st.header("🎁 Loyalty")
 
     sb = get_client()
-    user = _get_user(sb)
+
+    # Must be logged in
+    try:
+        user = sb.auth.get_user().user
+    except Exception:
+        user = None
+
     if not user:
         st.info("Log in to view your loyalty points and offers.")
         return
 
     uid = getattr(user, "id", None)
-    email = getattr(user, "email", "")
 
-    # Find the customer row by auth_user_id
-    cust = sb.table("customers").select("id, full_name, email").eq("auth_user_id", uid).limit(1).execute().data
-    cust = cust[0] if cust else None
+    # ✅ If profile missing, create it automatically (no need to place an order)
+    try:
+        sb.rpc(
+            "ensure_customer_profile",
+            {
+                "p_full_name": None,
+                "p_phone": None,
+                "p_marketing_consent": False,
+            },
+        ).execute()
+    except Exception:
+        # If this fails, we'll still try to read what exists
+        pass
 
-    if not cust:
-        st.warning("We couldn't find your customer profile yet. Place an order once while logged in, then come back.")
+    # Now fetch your customer row
+    cust_rows = (
+        sb.table("customers")
+        .select("id, full_name")
+        .eq("auth_user_id", uid)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not cust_rows:
+        st.error(
+            "You're logged in, but the customer profile still isn't visible. "
+            "This usually means the auth session isn't being restored correctly."
+        )
+        st.caption("Fix: update supabase_client.py so get_client() restores session tokens.")
         return
 
-    customer_id = cust["id"]
+    customer_id = cust_rows[0]["id"]
 
-    acct = sb.table("loyalty_accounts").select("points_balance,lifetime_points,tier").eq("customer_id", customer_id).limit(1).execute().data
-    acct = acct[0] if acct else {"points_balance": 0, "lifetime_points": 0, "tier": None}
+    acct_rows = (
+        sb.table("loyalty_accounts")
+        .select("points_balance,lifetime_points,tier")
+        .eq("customer_id", customer_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    acct = acct_rows[0] if acct_rows else {"points_balance": 0, "lifetime_points": 0, "tier": None}
 
     points = int(acct.get("points_balance") or 0)
     lifetime = int(acct.get("lifetime_points") or 0)
     tier = acct.get("tier") or "—"
 
-    st.subheader("Your points")
     c1, c2, c3 = st.columns(3)
     c1.metric("Current points", points)
     c2.metric("Lifetime points", lifetime)
@@ -52,7 +81,6 @@ def page_loyalty():
     st.divider()
     st.subheader("Offers you can unlock")
 
-    # Find next offer progress
     next_offer = None
     for o in OFFERS:
         if points < o["points"]:
@@ -60,9 +88,8 @@ def page_loyalty():
             break
 
     if next_offer:
-        needed = next_offer["points"] - points
         st.progress(min(1.0, points / next_offer["points"]))
-        st.caption(f"You're **{needed}** points away from: **{next_offer['title']}**")
+        st.caption(f"You're **{next_offer['points'] - points}** points away from: **{next_offer['title']}**")
     else:
         st.success("You've unlocked all current offers 🎉")
 
@@ -71,25 +98,6 @@ def page_loyalty():
         with st.container(border=True):
             st.write(f"**{o['title']}**")
             st.write(f"Required: **{o['points']}** points")
-            st.write(o.get("notes",""))
             if unlocked:
                 st.success("Unlocked")
 
-    st.divider()
-    st.subheader("Current promotions")
-    # Show active discount codes (not tied to points, just useful for customers)
-    try:
-        discounts = sb.table("discounts").select("code,name,description,discount_type,amount,valid_from,valid_to,is_active").eq("is_active", True).execute().data or []
-    except Exception:
-        discounts = []
-
-    if not discounts:
-        st.caption("No promotions listed right now.")
-    else:
-        for d in discounts:
-            with st.container(border=True):
-                title = d.get("name") or d.get("code")
-                st.write(f"**{title}** — code: `{d.get('code','')}`")
-                if d.get("description"):
-                    st.write(d["description"])
-                st.caption(f"Type: {d.get('discount_type')} • Amount: {d.get('amount')}")
